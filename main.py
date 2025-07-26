@@ -1,14 +1,12 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import httpx
-import re
 import asyncio
 from datetime import datetime, timedelta
 import logging
 import os
-from urllib.parse import urljoin, urlparse
 import json
 
 # Configure logging
@@ -24,7 +22,7 @@ app = FastAPI(
 # CORS middleware for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify your frontend domain
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -147,8 +145,7 @@ class SECDataService:
             return {}
     
     def _determine_exchange(self, ticker: str) -> str:
-        """Determine exchange based on ticker patterns (simplified)"""
-        # This is a simplified approach - in production you'd use a proper exchange mapping
+        """Determine exchange based on ticker patterns"""
         if len(ticker) <= 4 and ticker.isalpha():
             return "NASDAQ"
         else:
@@ -208,8 +205,8 @@ class SECDataService:
         form_type_mapping = {
             'quarterlyAnnual': ['10-Q', '10-K', '10-K/A', '10-Q/A'],
             'form8k': ['8-K', '8-K/A'],
-            'earnings': ['8-K'],  # Earnings are often in 8-K filings
-            'presentations': ['8-K', 'DEF 14A']  # Investor presentations
+            'earnings': ['8-K'],
+            'presentations': ['8-K', 'DEF 14A']
         }
         
         # Check if form type matches requested file types
@@ -257,7 +254,7 @@ class SECDataService:
                 name=display_name,
                 type=file_type,
                 date=filing_date,
-                size="Unknown",  # SEC doesn't provide size easily
+                size="Unknown",
                 url=doc_url,
                 form_type=form_type,
                 period_end=filing_date
@@ -340,4 +337,23 @@ async def root():
         "endpoints": {
             "/health": "Health check",
             "/search": "Search company filings (POST)",
-            "/companies/
+            "/companies/{ticker}": "Get company info by ticker",
+            "/docs": "API documentation"
+        }
+    }
+
+if __name__ == "__main__":
+    import uvicorn
+    
+    # Get port from environment variable for deployment platforms
+    port = int(os.environ.get("PORT", 8000))
+    
+    print(f"Starting server on host 0.0.0.0 and port {port}")
+    
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=port,
+        log_level="info",
+        access_log=True
+    )
