@@ -98,46 +98,12 @@ COMPANY_NAMES = {
     'ACN': 'Accenture PLC',
     'BMY': 'Bristol-Myers Squibb Co.',
     'MDT': 'Medtronic PLC',
-    'WFC': 'Wells Fargo & Co.',
-    'TXN': 'Texas Instruments Inc.',
-    'RTX': 'Raytheon Technologies Corp.',
-    'HON': 'Honeywell International Inc.',
-    'QCOM': 'Qualcomm Inc.',
-    'UPS': 'United Parcel Service Inc.',
-    'LOW': 'Lowe\'s Companies Inc.',
-    'LIN': 'Linde PLC',
-    'PM': 'Philip Morris International Inc.',
-    'SBUX': 'Starbucks Corp.',
-    'CAT': 'Caterpillar Inc.',
-    'GS': 'Goldman Sachs Group Inc.',
-    'MS': 'Morgan Stanley',
-    'IBM': 'International Business Machines Corp.',
-    'GILD': 'Gilead Sciences Inc.',
-    'CVS': 'CVS Health Corp.',
-    'BLK': 'BlackRock Inc.',
-    'AXP': 'American Express Co.',
-    'ISRG': 'Intuitive Surgical Inc.',
-    'DE': 'Deere & Co.',
-    'AMAT': 'Applied Materials Inc.',
-    'ADI': 'Analog Devices Inc.',
-    'MMM': '3M Co.',
-    'PYPL': 'PayPal Holdings Inc.',
-    'LRCX': 'Lam Research Corp.',
-    'BA': 'Boeing Co.',
-    'MU': 'Micron Technology Inc.',
-    'TJX': 'TJX Companies Inc.',
-    'BKNG': 'Booking Holdings Inc.',
-    'MDLZ': 'Mondelez International Inc.',
-    'REGN': 'Regeneron Pharmaceuticals Inc.',
-    'ZTS': 'Zoetis Inc.',
 }
 
-# Helper functions
 async def get_cik_from_ticker(ticker: str) -> Optional[str]:
-    """Get CIK number from ticker using SEC's company tickers API"""
+    """Get the CIK number for a given ticker using the SEC company tickers file"""
     try:
-        async with httpx.AsyncClient() as client:
-            # Add user agent as required by SEC
+        async with httpx.AsyncClient(timeout=10.0) as client:
             headers = {"User-Agent": "QuickFilings API (contact@quickfilings.com)"}
             response = await client.get(
                 "https://www.sec.gov/files/company_tickers.json",
@@ -156,34 +122,28 @@ async def get_cik_from_ticker(ticker: str) -> Optional[str]:
 
 async def get_sec_filings(cik: str, file_types: List[str], quarters_back: int, annuals_back: int) -> List[FileItem]:
     """Fetch SEC filings from EDGAR API"""
-    files = []
+    files: List[FileItem] = []
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             headers = {"User-Agent": "QuickFilings API (contact@quickfilings.com)"}
-            
             # Get company submissions
             url = f"https://data.sec.gov/submissions/CIK{cik}.json"
             response = await client.get(url, headers=headers)
-            
             if response.status_code == 200:
                 data = response.json()
                 filings = data.get('filings', {}).get('recent', {})
-                
                 if filings:
                     # Process filings
                     for i, form_type in enumerate(filings.get('form', [])):
                         try:
                             filing_date = filings.get('filingDate', [])[i]
                             accession_number = filings.get('accessionNumber', [])[i]
-                            
                             # Skip if too old
                             filing_date_obj = datetime.strptime(filing_date, '%Y-%m-%d')
                             cutoff_date = datetime.now() - timedelta(days=365 * 6)  # 6 years max
                             if filing_date_obj < cutoff_date:
                                 continue
-                            
-                            file_item = None
-                            
+                            file_item: Optional[FileItem] = None
                             # Handle different filing types
                             if 'quarterlyAnnual' in file_types:
                                 if form_type == '10-K' and annuals_back > 0:
@@ -198,7 +158,6 @@ async def get_sec_filings(cik: str, file_types: List[str], quarters_back: int, a
                                             size="2.5 MB",
                                             url=f"https://www.sec.gov/Archives/edgar/data/{cik.lstrip('0')}/{accession_number.replace('-', '')}/{accession_number}.txt"
                                         )
-                                
                                 elif form_type == '10-Q' and quarters_back > 0:
                                     # Check if this quarterly report is within our limit
                                     months_back = quarters_back * 3
@@ -212,7 +171,6 @@ async def get_sec_filings(cik: str, file_types: List[str], quarters_back: int, a
                                             size="1.8 MB",
                                             url=f"https://www.sec.gov/Archives/edgar/data/{cik.lstrip('0')}/{accession_number.replace('-', '')}/{accession_number}.txt"
                                         )
-                                
                                 elif form_type == 'DEF 14A' and annuals_back > 0:
                                     year = filing_date_obj.year
                                     current_year = datetime.now().year
@@ -224,7 +182,6 @@ async def get_sec_filings(cik: str, file_types: List[str], quarters_back: int, a
                                             size="3.1 MB",
                                             url=f"https://www.sec.gov/Archives/edgar/data/{cik.lstrip('0')}/{accession_number.replace('-', '')}/{accession_number}.txt"
                                         )
-                            
                             if 'form8k' in file_types and form_type == '8-K':
                                 # Get recent 8-K filings
                                 if filing_date_obj >= datetime.now() - timedelta(days=365):
@@ -235,30 +192,23 @@ async def get_sec_filings(cik: str, file_types: List[str], quarters_back: int, a
                                         size="650 KB",
                                         url=f"https://www.sec.gov/Archives/edgar/data/{cik.lstrip('0')}/{accession_number.replace('-', '')}/{accession_number}.txt"
                                     )
-                            
                             if file_item:
                                 files.append(file_item)
-                                
-                        except (IndexError, ValueError) as e:
+                        except (IndexError, ValueError):
                             continue
-                    
     except Exception as e:
         print(f"Error fetching SEC filings: {e}")
-    
     return files
 
 async def scrape_company_ir_site(ticker: str, file_types: List[str], quarters_back: int) -> List[FileItem]:
     """Generate mock IR files for now - simplified without BeautifulSoup"""
-    files = []
-    
+    files: List[FileItem] = []
     # For now, generate mock earnings and presentation files
     # This avoids the HTML parsing complexity that was causing build issues
-    
     if 'earnings' in file_types:
         # Mock earnings files
         quarters = ['Q2', 'Q1', 'Q4', 'Q3']
         dates = ['2025-07-25', '2025-04-25', '2025-01-30', '2024-10-25']
-        
         for i in range(min(quarters_back, 4)):
             files.append(FileItem(
                 name=f"{ticker}_{quarters[i]}_2025_Earnings.pdf",
@@ -267,7 +217,6 @@ async def scrape_company_ir_site(ticker: str, file_types: List[str], quarters_ba
                 size=f"{500 + i*50} KB",
                 url=f"https://investor.{ticker.lower()}.com/earnings_{quarters[i].lower()}_2025.pdf"
             ))
-    
     if 'presentations' in file_types:
         # Mock investor presentations
         files.append(FileItem(
@@ -277,85 +226,48 @@ async def scrape_company_ir_site(ticker: str, file_types: List[str], quarters_ba
             size="6.2 MB",
             url=f"https://investor.{ticker.lower()}.com/investor_day_2024.pdf"
         ))
-        
         files.append(FileItem(
             name=f"{ticker}_Q2_2025_Investor_Presentation.pdf",
-            type="Investor Presentation", 
+            type="Investor Presentation",
             date="2025-07-30",
             size="4.1 MB",
             url=f"https://investor.{ticker.lower()}.com/presentation_q2_2025.pdf"
         ))
-    
     return files
 
 # Download proxy endpoints
 @app.get("/download")
 async def download_file(url: str, filename: str = None):
     """Proxy download endpoint to handle CORS and direct downloads"""
-    
     try:
-        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-            headers = {
-                "User-Agent": "QuickFilings API (contact@quickfilings.com)",
-                "Accept": "application/pdf,application/octet-stream,*/*"
-            }
-            
-            response = await client.get(url, headers=headers)
-            
-            if response.status_code == 200:
-                # Determine content type
-                content_type = response.headers.get('content-type', 'application/octet-stream')
-                
-                # Set filename if not provided
-                if not filename:
-                    # Try to extract from URL
-                    filename = url.split('/')[-1]
-                    if '.' not in filename:
-                        filename = f"document.pdf"
-                
-                # Create streaming response
-                headers = {
-                    "Content-Disposition": f"attachment; filename={filename}",
-                    "Content-Type": content_type,
-                    "Content-Length": str(len(response.content)) if response.content else None
-                }
-                
-                # Remove None values
-                headers = {k: v for k, v in headers.items() if v is not None}
-                
-                return StreamingResponse(
-                    io.BytesIO(response.content),
-                    media_type=content_type,
-                    headers=headers
-                )
-            else:
-                raise HTTPException(status_code=response.status_code, detail="File not accessible")
-                
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
-
-@app.get("/proxy")
-async def proxy_file(url: str):
-    """Simple proxy endpoint for viewing files without download"""
-    
-    try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            headers = {
-                "User-Agent": "QuickFilings API (contact@quickfilings.com)"
-            }
-            
-            response = await client.get(url, headers=headers)
-            
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(url)
             if response.status_code == 200:
                 content_type = response.headers.get('content-type', 'application/octet-stream')
-                
                 return StreamingResponse(
                     io.BytesIO(response.content),
                     media_type=content_type
                 )
             else:
                 raise HTTPException(status_code=response.status_code, detail="File not accessible")
-                
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Proxy failed: {str(e)}")
+
+# Proxy endpoint for general proxying of external resources
+@app.get("/proxy")
+async def proxy(url: str):
+    """General proxy endpoint to handle CORS and proxy external requests"""
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(url)
+            if response.status_code == 200:
+                content_type = response.headers.get('content-type', 'application/octet-stream')
+                return StreamingResponse(
+                    io.BytesIO(response.content),
+                    media_type=content_type
+                )
+            else:
+                raise HTTPException(status_code=response.status_code, detail="File not accessible")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Proxy failed: {str(e)}")
 
@@ -373,26 +285,20 @@ async def search_company(
     search_request: SearchRequest
 ):
     """Search for company filings and presentations"""
-    
     ticker = search_request.ticker
     file_types = search_request.file_types
     quarters_back = search_request.quarters_back
     annuals_back = search_request.annuals_back
     exchange = search_request.exchange
-    
     if not ticker:
         raise HTTPException(status_code=400, detail="Ticker symbol is required")
-    
     ticker = ticker.upper().strip()
-    
     # Get CIK for SEC API
     cik = await get_cik_from_ticker(ticker)
     if not cik:
         raise HTTPException(status_code=404, detail=f"Company not found for ticker: {ticker}")
-    
     # Get company name
     company_name = COMPANY_NAMES.get(ticker, f"{ticker} Inc.")
-    
     # Create company data
     company_data = CompanyData(
         ticker=ticker,
@@ -400,36 +306,28 @@ async def search_company(
         cik=cik,
         exchange=exchange if exchange != "auto" else "NASDAQ"
     )
-    
     # Fetch files from different sources
-    all_files = []
-    
+    all_files: List[FileItem] = []
     # Get SEC filings
     sec_files = await get_sec_filings(cik, file_types, quarters_back, annuals_back)
     all_files.extend(sec_files)
-    
     # Get IR site files for earnings and presentations
     if 'earnings' in file_types or 'presentations' in file_types:
         ir_files = await scrape_company_ir_site(ticker, file_types, quarters_back)
         all_files.extend(ir_files)
-    
     # Remove duplicates and sort by date
-    unique_files = []
-    seen_names = set()
-    
+    unique_files: List[FileItem] = []
+    seen_names: set = set()
     for file in all_files:
         if file.name not in seen_names:
             # Add download URLs using our proxy endpoints
             original_url = file.url
             file.url = f"{request.url.scheme}://{request.url.netloc}/proxy?url={original_url}"
             file.download_url = f"{request.url.scheme}://{request.url.netloc}/download?url={original_url}&filename={file.name}"
-            
             unique_files.append(file)
             seen_names.add(file.name)
-    
     # Sort by date (newest first)
     unique_files.sort(key=lambda x: x.date, reverse=True)
-    
     return SearchResponse(
         company=company_data,
         files=unique_files
