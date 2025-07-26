@@ -1,9 +1,10 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from typing import List, Optional
 import httpx
 import asyncio
-from typing import List, Optional
 import re
 from datetime import datetime, timedelta
 import json
@@ -11,31 +12,43 @@ from urllib.parse import urljoin, urlparse
 import time
 import io
 
-# Remove BeautifulSoup and lxml - use simple requests instead
-# We'll do basic IR scraping without HTML parsing for now
+# Pydantic Models
+class FileItem(BaseModel):
+    name: str
+    type: str
+    date: str
+    size: str
+    url: str
+    download_url: Optional[str] = None
 
-class FileItem:
-    def __init__(self, name: str, type: str, date: str, size: str, url: str, download_url: Optional[str] = None):
-        self.name = name
-        self.type = type
-        self.date = date
-        self.size = size
-        self.url = url
-        self.download_url = download_url
+class CompanyData(BaseModel):
+    ticker: str
+    name: str
+    cik: str
+    exchange: str
 
-class CompanyData:
-    def __init__(self, ticker: str, name: str, cik: str, exchange: str):
-        self.ticker = ticker
-        self.name = name
-        self.cik = cik
-        self.exchange = exchange
+class SearchRequest(BaseModel):
+    ticker: str
+    file_types: List[str]
+    quarters_back: int = 4
+    annuals_back: int = 5
+    exchange: str = "auto"
+
+class SearchResponse(BaseModel):
+    company: CompanyData
+    files: List[FileItem]
 
 app = FastAPI(title="QuickFilings API", version="1.0.0")
 
 # Enable CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify your frontend domain
+    allow_origins=[
+        "https://yourusername.github.io",  # Replace with your GitHub Pages URL
+        "http://localhost:3000",  # For local development
+        "http://localhost:8000",
+        "*"  # Remove this in production for security
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -117,174 +130,6 @@ COMPANY_NAMES = {
     'MDLZ': 'Mondelez International Inc.',
     'REGN': 'Regeneron Pharmaceuticals Inc.',
     'ZTS': 'Zoetis Inc.',
-    'C': 'Citigroup Inc.',
-    'CCI': 'Crown Castle Inc.',
-    'TMUS': 'T-Mobile US Inc.',
-    'PLD': 'Prologis Inc.',
-    'SO': 'Southern Co.',
-    'CB': 'Chubb Ltd.',
-    'SYK': 'Stryker Corp.',
-    'NOW': 'ServiceNow Inc.',
-    'DUK': 'Duke Energy Corp.',
-    'BSX': 'Boston Scientific Corp.',
-    'BDX': 'Becton Dickinson and Co.',
-    'MO': 'Altria Group Inc.',
-    'AMT': 'American Tower Corp.',
-    'EQIX': 'Equinix Inc.',
-    'CSX': 'CSX Corp.',
-    'USB': 'U.S. Bancorp',
-    'ICE': 'Intercontinental Exchange Inc.',
-    'AON': 'Aon PLC',
-    'CL': 'Colgate-Palmolive Co.',
-    'NSC': 'Norfolk Southern Corp.',
-    'FDX': 'FedEx Corp.',
-    'SHW': 'Sherwin-Williams Co.',
-    'ITW': 'Illinois Tool Works Inc.',
-    'GD': 'General Dynamics Corp.',
-    'FCX': 'Freeport-McMoRan Inc.',
-    'CME': 'CME Group Inc.',
-    'INTU': 'Intuit Inc.',
-    'TGT': 'Target Corp.',
-    'PNC': 'PNC Financial Services Group Inc.',
-    'SCHW': 'Charles Schwab Corp.',
-    'EOG': 'EOG Resources Inc.',
-    'EMR': 'Emerson Electric Co.',
-    'MCO': 'Moody\'s Corp.',
-    'NOC': 'Northrop Grumman Corp.',
-    'MPC': 'Marathon Petroleum Corp.',
-    'APD': 'Air Products and Chemicals Inc.',
-    'KLAC': 'KLA Corp.',
-    'SPGI': 'S&P Global Inc.',
-    'SNPS': 'Synopsys Inc.',
-    'CDNS': 'Cadence Design Systems Inc.',
-    'MMC': 'Marsh & McLennan Companies Inc.',
-    'TFC': 'Truist Financial Corp.',
-    'ADP': 'Automatic Data Processing Inc.',
-    'ORLY': 'O\'Reilly Automotive Inc.',
-    'COP': 'ConocoPhillips',
-    'ECL': 'Ecolab Inc.',
-    'GM': 'General Motors Co.',
-    'PSX': 'Phillips 66',
-    'VLO': 'Valero Energy Corp.',
-    'NEM': 'Newmont Corp.',
-    'CARR': 'Carrier Global Corp.',
-    'SLB': 'Schlumberger Ltd.',
-    'MNST': 'Monster Beverage Corp.',
-    'WM': 'Waste Management Inc.',
-    'GE': 'General Electric Co.',
-    'ADSK': 'Autodesk Inc.',
-    'MSI': 'Motorola Solutions Inc.',
-    'AIG': 'American International Group Inc.',
-    'NXPI': 'NXP Semiconductors NV',
-    'PSA': 'Public Storage',
-    'D': 'Dominion Energy Inc.',
-    'ROST': 'Ross Stores Inc.',
-    'MCHP': 'Microchip Technology Inc.',
-    'PAYX': 'Paychex Inc.',
-    'HUM': 'Humana Inc.',
-    'O': 'Realty Income Corp.',
-    'BK': 'Bank of New York Mellon Corp.',
-    'SPG': 'Simon Property Group Inc.',
-    'FAST': 'Fastenal Co.',
-    'ODFL': 'Old Dominion Freight Line Inc.',
-    'EXC': 'Exelon Corp.',
-    'CTSH': 'Cognizant Technology Solutions Corp.',
-    'KMB': 'Kimberly-Clark Corp.',
-    'VRSK': 'Verisk Analytics Inc.',
-    'CTAS': 'Cintas Corp.',
-    'EA': 'Electronic Arts Inc.',
-    'IDXX': 'IDEXX Laboratories Inc.',
-    'VRTX': 'Vertex Pharmaceuticals Inc.',
-    'YUM': 'Yum! Brands Inc.',
-    'KHC': 'Kraft Heinz Co.',
-    'BIIB': 'Biogen Inc.',
-    'GIS': 'General Mills Inc.',
-    'HSY': 'Hershey Co.',
-    'EW': 'Edwards Lifesciences Corp.',
-    'XEL': 'Xcel Energy Inc.',
-    'CTVA': 'Corteva Inc.',
-    'DLTR': 'Dollar Tree Inc.',
-    'OTIS': 'Otis Worldwide Corp.',
-    'WBA': 'Walgreens Boots Alliance Inc.',
-    'HPQ': 'HP Inc.',
-    'IQV': 'IQVIA Holdings Inc.',
-    'ROK': 'Rockwell Automation Inc.',
-    'MPWR': 'Monolithic Power Systems Inc.',
-    'ENPH': 'Enphase Energy Inc.',
-    'DXCM': 'DexCom Inc.',
-    'FISV': 'Fiserv Inc.',
-    'RMD': 'ResMed Inc.',
-    'CPRT': 'Copart Inc.',
-    'EXR': 'Extended Stay America Inc.',
-    'CMG': 'Chipotle Mexican Grill Inc.',
-    'WDC': 'Western Digital Corp.',
-    'DHI': 'D.R. Horton Inc.',
-    'LEN': 'Lennar Corp.',
-    'ALGN': 'Align Technology Inc.',
-    'FTV': 'Fortive Corp.',
-    'KEYS': 'Keysight Technologies Inc.',
-    'CEG': 'Constellation Energy Corp.',
-    'ANSS': 'ANSYS Inc.',
-    'ROP': 'Roper Technologies Inc.',
-    'AWK': 'American Water Works Co. Inc.',
-    'NTRS': 'Northern Trust Corp.',
-    'MLM': 'Martin Marietta Materials Inc.',
-    'STZ': 'Constellation Brands Inc.',
-    'FANG': 'Diamondback Energy Inc.',
-    'PPG': 'PPG Industries Inc.',
-    'CHTR': 'Charter Communications Inc.',
-    'GWW': 'W.W. Grainger Inc.',
-    'ES': 'Eversource Energy',
-    'EQR': 'Equity Residential',
-    'CDW': 'CDW Corp.',
-    'BRO': 'Brown & Brown Inc.',
-    'PCAR': 'PACCAR Inc.',
-    'TROW': 'T. Rowe Price Group Inc.',
-    'AVB': 'AvalonBay Communities Inc.',
-    'ZBH': 'Zimmer Biomet Holdings Inc.',
-    'ATO': 'Atmos Energy Corp.',
-    'LH': 'Labcorp Holdings Inc.',
-    'PKI': 'PerkinElmer Inc.',
-    'EXPD': 'Expeditors International of Washington Inc.',
-    'IFF': 'International Flavors & Fragrances Inc.',
-    'GPN': 'Global Payments Inc.',
-    'CHD': 'Church & Dwight Co. Inc.',
-    'MTB': 'M&T Bank Corp.',
-    'A': 'Agilent Technologies Inc.',
-    'SBAC': 'SBA Communications Corp.',
-    'EIX': 'Edison International',
-    'HUBB': 'Hubbell Inc.',
-    'WST': 'West Pharmaceutical Services Inc.',
-    'SWKS': 'Skyworks Solutions Inc.',
-    'PEG': 'Public Service Enterprise Group Inc.',
-    'DOV': 'Dover Corp.',
-    'FRC': 'First Republic Bank',
-    'FITB': 'Fifth Third Bancorp',
-    'HBAN': 'Huntington Bancshares Inc.',
-    'KEY': 'KeyCorp',
-    'RF': 'Regions Financial Corp.',
-    'AES': 'AES Corp.',
-    'K': 'Kellogg Co.',
-    'STE': 'STERIS PLC',
-    'VICI': 'VICI Properties Inc.',
-    'WELL': 'Welltower Inc.',
-    'MAA': 'Mid-America Apartment Communities Inc.',
-    'UDR': 'UDR Inc.',
-    'ESS': 'Essex Property Trust Inc.',
-    'CPT': 'Camden Property Trust',
-    'ARE': 'Alexandria Real Estate Equities Inc.',
-    'VTR': 'Ventas Inc.',
-    'DLR': 'Digital Realty Trust Inc.',
-    'BXP': 'Boston Properties Inc.',
-    'HST': 'Host Hotels & Resorts Inc.',
-    'REG': 'Regency Centers Corp.',
-    'FRT': 'Federal Realty Investment Trust',
-    'KIM': 'Kimco Realty Corp.',
-    'UE': 'Urban Edge Properties',
-    'WPC': 'W. P. Carey Inc.',
-    'NNN': 'National Retail Properties Inc.',
-    'ADC': 'Agree Realty Corp.',
-    'STAG': 'Stag Industrial Inc.'
 }
 
 # Helper functions
@@ -443,15 +288,6 @@ async def scrape_company_ir_site(ticker: str, file_types: List[str], quarters_ba
     
     return files
 
-# Remove the complex BeautifulSoup functions
-async def find_earnings_files(soup, base_url: str, quarters_back: int) -> List[FileItem]:
-    """Placeholder - removed to avoid BeautifulSoup dependency"""
-    return []
-
-async def find_presentation_files(soup, base_url: str, quarters_back: int) -> List[FileItem]:
-    """Placeholder - removed to avoid BeautifulSoup dependency"""
-    return []
-
 # Download proxy endpoints
 @app.get("/download")
 async def download_file(url: str, filename: str = None):
@@ -478,10 +314,6 @@ async def download_file(url: str, filename: str = None):
                         filename = f"document.pdf"
                 
                 # Create streaming response
-                def generate():
-                    for chunk in response.iter_bytes(chunk_size=8192):
-                        yield chunk
-                
                 headers = {
                     "Content-Disposition": f"attachment; filename={filename}",
                     "Content-Type": content_type,
@@ -538,13 +370,15 @@ async def health_check():
 @app.post("/search", response_model=SearchResponse)
 async def search_company(
     request: Request,
-    ticker: str,
-    file_types: List[str],
-    quarters_back: int = 4,
-    annuals_back: int = 5,
-    exchange: str = "auto"
+    search_request: SearchRequest
 ):
     """Search for company filings and presentations"""
+    
+    ticker = search_request.ticker
+    file_types = search_request.file_types
+    quarters_back = search_request.quarters_back
+    annuals_back = search_request.annuals_back
+    exchange = search_request.exchange
     
     if not ticker:
         raise HTTPException(status_code=400, detail="Ticker symbol is required")
@@ -555,6 +389,9 @@ async def search_company(
     cik = await get_cik_from_ticker(ticker)
     if not cik:
         raise HTTPException(status_code=404, detail=f"Company not found for ticker: {ticker}")
+    
+    # Get company name
+    company_name = COMPANY_NAMES.get(ticker, f"{ticker} Inc.")
     
     # Create company data
     company_data = CompanyData(
